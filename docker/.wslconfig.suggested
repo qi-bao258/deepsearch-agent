@@ -1,0 +1,6 @@
+[wsl2]
+# 供 RAGFlow 部署使用：官方推荐 16 GB 内存，默认 WSL 只拿到一半（约 7.8 GB）会 OOM
+# 本机物理内存 15.6 GB，这里给 WSL 10 GB，剩余留给 Windows 与 deepsearch 后端
+memory=10GB
+processors=8
+swap=4GB
