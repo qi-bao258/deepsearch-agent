@@ -5,22 +5,18 @@ Markdown 转 PDF 工具
 会话目录中的输入/输出路径，真正的版式转换交给 app.utils.word_converter。
 """
 
-import logging
 from pathlib import Path
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-
-try:
-    from typing import Annotated, Optional
-except ImportError:
-    from typing_extensions import Annotated, Optional
+from typing import Annotated, Optional
 
 from langchain_core.tools import tool
 
 from app.api.context import get_session_context
 from app.api.monitor import monitor
-from app.utils.path_utils import resolve_path
+from app.infra.log import logger
+from app.utils.path_utils import PathSecurityError, resolve_path
 from app.utils.word_converter import convert_md_to_pdf as convert_md_to_pdf_via_word
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 @tool
@@ -58,15 +54,21 @@ def convert_md_to_pdf(
         # PDF 版式、中文字体和 Markdown 解析细节都封装在底层转换模块中
         return convert_md_to_pdf_via_word(md_abs_path, pdf_abs_path)
 
+    except PathSecurityError as e:
+        # 路径越界是可预期的拒绝，给出明确指引而不是笼统的"转换失败"
+        logger.warning(f"PDF 转换被路径安全策略拦截: {e}")
+        return f"转换失败：{e}，请使用工作目录内的相对路径。"
     except Exception as e:
-        logging.error(f"转换失败: {e}", exc_info=True)
+        logger.exception(f"转换失败: {e}")
         return f"转换失败: {str(e)}"
 
 
 if __name__ == "__main__":
     # 本地调试入口：直接运行本文件可验证 Markdown 转 PDF 链路
     DEBUG_DIR = PROJECT_ROOT / "app" / "output" / "_tool_selftest"
-    get_session_context = lambda: str(DEBUG_DIR)
+
+    def get_session_context():
+        return str(DEBUG_DIR)
 
     test_dir = DEBUG_DIR / "sub_dir"
     test_dir.mkdir(parents=True, exist_ok=True)
@@ -95,7 +97,8 @@ if __name__ == "__main__":
 
 ## 四、行动建议
 
-围绕“增长、转化、风控、合规”四个关键词设计分析框架，并将公开信息、数据库数据和 RAGFlow 知识库材料统一整理成可交付报告。
+围绕"增长、转化、风控、合规"四个关键词设计分析框架，
+并把公开信息、数据库数据与知识库材料统一整理成可交付报告。
 """,
         encoding="utf-8",
     )

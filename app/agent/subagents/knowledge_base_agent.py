@@ -15,15 +15,12 @@ DeepAgents 可识别的字典式子智能体。主智能体后续会根据 descr
 
 from app.agent.prompts import sub_agents_content
 
-# ---------------------------------------------------------------------------
-# RAGFlow 版本（已停用，保留以便切回）
-# ---------------------------------------------------------------------------
-# from app.tools.ragflow_tools import create_ask_delete, get_assistant_list
-
-# ---------------------------------------------------------------------------
-# 本地轻量 RAG 版本（当前启用）
-# ---------------------------------------------------------------------------
+# 当前启用的本地轻量 RAG 工具：python 侧解析 + bge-m3 嵌入 + numpy 检索
 from app.tools.local_kb_tools import ask_knowledge_base, list_knowledge_bases
+
+# RAGFlow 版工具仍保留在 app/tools/ragflow_tools.py，需要切回时把下面这行与
+# dict 中的 tools 声明一同换掉即可（提示词中的工具描述也要同步恢复）。
+# from app.tools.ragflow_tools import create_ask_delete, get_assistant_list
 
 # 知识库子智能体处理内部非结构化文档，与网络搜索助手、数据库查询助手形成互补
 # 它遵循"先查知识库分类 -> 再检索相关片段"的工作顺序

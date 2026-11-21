@@ -52,7 +52,10 @@ create_ask_delete 用于创建临时会话、发起一次问题查询，并在�
 #             # 不同版本 SDK 字段可能为空，这里用 getattr 兼容没有绑定知识库的助手
 #             dataset_names = getattr(chat, "kb_names", []) or []
 #
-#             count_chat_info += f"助手名称:{chat.name};功能介绍：{chat.description}; 关联的知识库：{'、'.join(dataset_names)} \n"
+#             count_chat_info += (
+#                 f"助手名称:{chat.name};功能介绍：{chat.description}; "
+#                 f"关联的知识库：{'、'.join(dataset_names)} \n"
+#             )
 #         return count_chat_info
 #     except Exception as e:
 #         return f"查询助手信息异常，无可用助手,异常信息:{str(e)}"
@@ -63,7 +66,8 @@ create_ask_delete 用于创建临时会话、发起一次问题查询，并在�
 #     """
 #     向某个 RAGFlow 聊天助手创建临时会话并完成一次提问
 #
-#     注意：调用此工具之前，必须先调用 get_assistant_list，明确可用助手名称和助手能力边界。
+#     注意：调用前必须先调用 get_assistant_list，
+#     明确可用的助手名称与助手能力边界。
 #     :param chat_name: 助手名称，必须来自 get_assistant_list 返回结果
 #     :param question: 本次提问的问题
 #     :return: RAGFlow 返回的回答文本；异常时返回中文错误提示
@@ -128,7 +132,7 @@ create_ask_delete 用于创建临时会话、发起一次问题查询，并在�
 #         create_ask_delete.invoke(
 #             {
 #                 "chat_name": "电商行业助手",
-#                 "question": "如果我是一个电商平台运营负责人，应该怎样制定 2026 年 AI 应用路线图？",
+#                 "question": "电商平台运营负责人应如何规划下一年的 AI 应用路线图？",
 #             }
 #         )
 #     )

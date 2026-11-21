@@ -1,8 +1,9 @@
 """
 Markdown 转 PDF 工具
 
-负责把 Markdown 文本解析成 ReportLab 文档元素，再生成 PDF
-该方案不依赖 Microsoft Word、浏览器或系统级 PDF 工具，可在 macOS、Windows 和 Linux 上运行
+负责把 Markdown 文本解析成 ReportLab 文档元素，再生成 PDF。
+该方案不依赖 Microsoft Word、浏览器或系统级 PDF 工具，
+可在 macOS、Windows 和 Linux 上运行。
 """
 
 import html

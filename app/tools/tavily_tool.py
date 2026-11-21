@@ -32,11 +32,12 @@ def internet_search(
     """
     根据用户问题检索互联网公开信息
 
-    注意：本工具只用于外部公开网页、新闻、政策等信息，不用于查询业务数据库或 RAGFlow 私有知识库
+    注意：本工具只用于外部公开网页、新闻、政策等信息，
+    不用于查询业务数据库或私有知识库。
     :param query: 搜索关键词或自然语言问题
     :param topic: 搜索主题，可选 news、finance、general
     :param max_results: 返回的最大结果数
-    :param include_raw_content: 是否返回网页原文内容；False 返回摘要，True 尝试返回更完整正文
+    :param include_raw_content: 是否返回网页原文；False 返回摘要，True 尝试返回完整正文
     :return: Tavily 返回的结构化搜索结果
     """
     # 工具内部埋点比外层 stream 解析更直接：只要工具被调用，前端就能看到本次搜索参数
@@ -51,7 +52,8 @@ def internet_search(
         },
     )
 
-    # Tavily 返回 query、results、title、url、content 等结构化字段，后续由子智能体阅读并汇总
+    # Tavily 返回 query、results、title、url、content 等结构化字段，
+    # 由子智能体阅读并汇总
     return tavily_client.search(
         query=query,
         topic=topic,

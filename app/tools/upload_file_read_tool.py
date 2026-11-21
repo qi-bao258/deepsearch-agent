@@ -13,7 +13,8 @@ from langchain_core.tools import tool
 
 from app.api.context import get_session_context
 from app.api.monitor import monitor
-from app.utils.path_utils import resolve_path
+from app.infra.log import logger
+from app.utils.path_utils import PathSecurityError, resolve_path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -57,7 +58,12 @@ def read_file_content(
 
     # 解析路径时优先约束在当前 session_dir 内，避免模型传入绝对路径导致越界读取
     session_dir = get_session_context()
-    file_path = Path(resolve_path(filename, session_dir))
+    try:
+        file_path = Path(resolve_path(filename, session_dir))
+    except PathSecurityError as e:
+        # 工具契约要求返回可读说明而非抛异常；越界属于可预期拒绝，不记 exception
+        logger.warning(f"文件读取被路径安全策略拦截: {e}")
+        return f"错误：{e}，请仅读取工作目录内的文件。"
 
     if not file_path.exists():
         return f"错误：文件 '{filename}' 不存在 (解析路径: {file_path})。"

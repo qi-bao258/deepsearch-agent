@@ -13,6 +13,8 @@ from langchain_core.tools import tool
 from mysql.connector import Error, connect
 
 from app.api.monitor import monitor
+from app.infra.log import logger
+from app.infra.sql_guard import SQLGuardError, guard_sql
 
 load_dotenv()
 
@@ -182,6 +184,17 @@ def execute_sql_query(query) -> str:
         tool_name="数据库表数据查询工具：execute_sql_query", args={"query": query}
     )
 
+    # 模型生成的 SQL 不可信：在抵达数据库之前先过一遍程序化护栏。
+    # Prompt 约束只是建议，这里才是真正的执行边界。
+    try:
+        guarded = guard_sql(query)
+    except SQLGuardError as e:
+        logger.warning(f"SQL 被安全护栏拦截: {e}")
+        return f"查询被安全策略拒绝：{e}。请改为只读查询（SELECT / WITH）后重试。"
+
+    if guarded.limit_injected:
+        logger.debug(f"SQL 未带 LIMIT 或超界，已自动约束为 {guarded.sql.split()[-1]}")
+
     # 获取数据库参数
     config = get_db_config()
 
@@ -190,13 +203,14 @@ def execute_sql_query(query) -> str:
     try:
         with connect(**config) as conn:
             with conn.cursor() as cursor:
-                # 当前依赖提示词约束模型生成只读查询；生产环境建议在工具层限制 SELECT/SHOW
-                cursor.execute(query)
+                # 使用护栏处理后的语句，确保 LIMIT 约束与关键字校验都已生效
+                logger.info(f"执行 SQL: {guarded.sql}")
+                cursor.execute(guarded.sql)
 
-                # 非查询类 SQL 没有结果集描述，这里统一返回提示，避免工具调用直接抛错给模型
+                # 无结果集时统一返回提示，避免工具调用直接抛错给模型
                 description = cursor.description
                 if not description:
-                    return f"执行自定义 SQL 语句没有查询结果，SQL 为：{query}"
+                    return f"执行自定义 SQL 语句没有查询结果，SQL 为：{guarded.sql}"
                 # description => [("列1", ...), ("列2", ...)]
                 columns = [desc[0] for desc in description]
 
@@ -211,15 +225,13 @@ def execute_sql_query(query) -> str:
                 data_str = "\n".join(results)
                 return f"{header_str}\n{data_str}"
     except Error as e:
+        logger.error(f"数据库查询异常: {e}")
         return f"查询出现异常：{str(e)}"
 
 
 if __name__ == "__main__":
     # 本地调试入口：直接运行本文件可验证 .env 中的 MySQL 连接配置是否可用
-    print(
-        execute_sql_query.invoke(
-            {
-                "query": "SELECT * FROM `drugs` dgs join sales_records srd on dgs.drug_id = srd.drug_id"
-            }
-        )
+    debug_sql = (
+        "SELECT * FROM `drugs` dgs JOIN sales_records srd ON dgs.drug_id = srd.drug_id"
     )
+    print(execute_sql_query.invoke({"query": debug_sql}))

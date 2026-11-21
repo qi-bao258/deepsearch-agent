@@ -43,7 +43,10 @@ def _resolve_kb_root() -> Path:
     if not candidate.is_absolute():
         # 相对路径优先按项目根目录解析，不存在时再按 app 目录解析
         project_relative = PROJECT_ROOT / candidate
-        candidate = project_relative if project_relative.exists() else APP_ROOT / candidate
+        if project_relative.exists():
+            candidate = project_relative
+        else:
+            candidate = APP_ROOT / candidate
     return candidate
 
 
@@ -155,7 +158,9 @@ def normalize_text(text: str) -> str:
     return text.strip()
 
 
-def split_text(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
+def split_text(
+    text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP
+) -> list[str]:
     """
     把长文本切成带重叠的片段
 
@@ -199,7 +204,10 @@ def build_chunks() -> list[Chunk]:
         if INDEX_DIR in path.parents or path.name.startswith("."):
             continue
 
-        category = path.relative_to(KB_ROOT).parts[0] if path.parent != KB_ROOT else "未分类"
+        if path.parent == KB_ROOT:
+            category = "未分类"
+        else:
+            category = path.relative_to(KB_ROOT).parts[0]
         try:
             pages = read_document(path)
         except Exception as exc:  # 单份文档损坏不应阻断整库构建
@@ -222,7 +230,12 @@ def build_chunks() -> list[Chunk]:
 class EmbeddingClient:
     """最小化的 OpenAI 兼容 Embedding 客户端"""
 
-    def __init__(self, base_url: Optional[str] = None, api_key: Optional[str] = None, model: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> None:
         self.base_url = (base_url or os.getenv("EMBEDDING_BASE_URL") or "").rstrip("/")
         self.api_key = api_key or os.getenv("EMBEDDING_API_KEY") or ""
         self.model = model or os.getenv("EMBEDDING_MODEL") or ""
@@ -240,7 +253,8 @@ class EmbeddingClient:
             if not value
         ]
         if missing:
-            raise ValueError(f"缺失 Embedding 配置：{', '.join(missing)}，请在 .env 中补齐")
+            joined = ", ".join(missing)
+            raise ValueError(f"缺失 Embedding 配置：{joined}，请在 .env 中补齐")
 
     def embed(self, texts: Iterable[str]) -> np.ndarray:
         """批量嵌入，返回 float32 矩阵，形状为 [文本数, 维度]"""
@@ -253,7 +267,10 @@ class EmbeddingClient:
 
         vectors: list[list[float]] = []
         url = f"{self.base_url}/embeddings"
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
 
         for start in range(0, len(items), self.batch_size):
             batch = items[start : start + self.batch_size]
@@ -298,7 +315,9 @@ def _fingerprint() -> str:
         if INDEX_DIR in path.parents or path.name.startswith("."):
             continue
         stat = path.stat()
-        digest.update(f"{path.relative_to(KB_ROOT)}|{stat.st_size}|{int(stat.st_mtime)}".encode())
+        digest.update(
+            f"{path.relative_to(KB_ROOT)}|{stat.st_size}|{int(stat.st_mtime)}".encode()
+        )
     return digest.hexdigest()
 
 
@@ -318,7 +337,9 @@ def index_exists() -> bool:
         meta = json.loads(_meta_path().read_text(encoding="utf-8"))
     except Exception:
         return False
-    return meta.get("fingerprint") == _fingerprint() and meta.get("model") == os.getenv("EMBEDDING_MODEL")
+    fingerprint_ok = meta.get("fingerprint") == _fingerprint()
+    model_ok = meta.get("model") == os.getenv("EMBEDDING_MODEL")
+    return fingerprint_ok and model_ok
 
 
 def load_index() -> tuple[np.ndarray, list[Chunk]]:
@@ -328,7 +349,12 @@ def load_index() -> tuple[np.ndarray, list[Chunk]]:
     meta = json.loads(_meta_path().read_text(encoding="utf-8"))
     vectors = np.load(_vectors_path())
     chunks = [
-        Chunk(text=c["text"], source=c["source"], category=c["category"], page=c["page"])
+        Chunk(
+            text=c["text"],
+            source=c["source"],
+            category=c["category"],
+            page=c["page"],
+        )
         for c in meta["chunks"]
     ]
     return vectors, chunks
@@ -360,7 +386,10 @@ def rebuild_index(progress: Optional[callable] = None) -> dict:
         if progress:
             progress(step, total_steps)
 
-    vectors = np.vstack(vectors_list) if vectors_list else np.zeros((0, 0), dtype="float32")
+    if vectors_list:
+        vectors = np.vstack(vectors_list)
+    else:
+        vectors = np.zeros((0, 0), dtype="float32")
 
     INDEX_DIR.mkdir(parents=True, exist_ok=True)
     np.save(_vectors_path(), vectors)
@@ -373,7 +402,8 @@ def rebuild_index(progress: Optional[callable] = None) -> dict:
             for c in chunks
         ],
     }
-    _meta_path().write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    meta_text = json.dumps(meta, ensure_ascii=False, indent=2)
+    _meta_path().write_text(meta_text, encoding="utf-8")
 
     sources = {c.source for c in chunks}
     return {
@@ -389,7 +419,9 @@ def rebuild_index(progress: Optional[callable] = None) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def search(question: str, top_k: int = 5, category: Optional[str] = None) -> list[tuple[float, Chunk]]:
+def search(
+    question: str, top_k: int = 5, category: Optional[str] = None
+) -> list[tuple[float, Chunk]]:
     """
     按问题检索最相关的片段
 

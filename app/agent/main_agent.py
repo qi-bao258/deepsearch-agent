@@ -103,7 +103,8 @@ async def run_deep_agent(task_query, session_id):
 
     规则：
     1. 新生成文件必须保存到工作目录：'{relative_session_dir_str}/filename'
-    2. 读取已上传的文件时，请直接将文件名（例如：'开篇.txt'）作为 filename 参数传入（read_file_content）读取工具，不要带上任何目录前缀。
+    2. 读取已上传的文件时，直接把文件名（例如 '开篇.txt'）作为 filename 参数
+       传给 read_file_content 工具，不要带任何目录前缀。
     3. 使用相对路径，禁止使用绝对路径
     4. 若存在上传文件，请先分析内容
     """
@@ -123,10 +124,10 @@ async def run_deep_agent(task_query, session_id):
                     last_msg = messages[-1]
                     if node_name == "model":
                         if last_msg.tool_calls:
-                            # DeepAgents 调用子智能体时，本质上会产生名为 task 的工具调用
+                            # 子智能体调用表现为名为 task 的工具调用
                             for tool_call in last_msg.tool_calls:
                                 if tool_call["name"] == "task":
-                                    # 子智能体调用单独上报，前端可以展示“正在调用哪个专家助手”
+                                    # 单独上报，前端据此展示当前专家助手
                                     monitor.report_assistant(
                                         tool_call["args"]["subagent_type"],
                                         {
@@ -136,7 +137,7 @@ async def run_deep_agent(task_query, session_id):
                                         },
                                     )
                         elif last_msg.content:
-                            # 模型没有继续调用工具时，最新文本内容就是本轮可反馈给前端的结果
+                            # 模型不再调用工具时，最新文本内容就是本轮可反馈给前端的结果
                             print(
                                 f"主智能体执行结果，最终结果：{last_msg.content[:100]}"
                             )

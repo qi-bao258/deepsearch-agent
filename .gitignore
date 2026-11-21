@@ -7,6 +7,10 @@ app/output
 app/updated
 # 本地知识库索引为运行时构建产物，由首次任务自动生成
 docs/knowledge_base/.kb_index/
+# 评测运行报告属于产物，评测集本身（golden_set.yaml）才需要入库
+eval/report.json
+# loguru 落盘的运行日志
+logs/
 # 历史改写前的本地备份，不纳入版本控制
 .git-backup/
 /out-tsc

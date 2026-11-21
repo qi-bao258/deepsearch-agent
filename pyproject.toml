@@ -1,7 +1,7 @@
 [project]
-name = "deepsearch-agents"
+name = "deepsearch-agent"
 version = "0.1.0"
-description = "DeepAgents learning examples for deep research agents."
+description = "基于 DeepAgents 的对话式多智能体深度研究系统"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "aiofiles>=23.0.0",
@@ -12,8 +12,10 @@ dependencies = [
     "langchain-core>=0.2.0",
     "langchain-openai==1.2.1",
     "langgraph==1.1.10",
+    "loguru>=0.7.0",
     "markdown>=3.5",
     "mysql-connector-python>=8.0.0",
+    "numpy>=1.26.0",
     "openai>=1.0.0",
     "openpyxl>=3.1.0",
     "pandas>=2.0.0",
@@ -33,3 +35,44 @@ dependencies = [
 
 [tool.uv]
 package = false
+
+[dependency-groups]
+# 开发与测试依赖与运行依赖隔离：
+# 镜像构建只装 dependencies，避免把 pytest / ruff 带进生产镜像。
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.6.0",
+]
+
+[tool.pytest.ini_options]
+# asyncio_mode = "auto" 让异步用例无需逐个标注 @pytest.mark.asyncio，
+# 否则新增异步测试很容易因漏标而"静默通过"（pytest 会跳过未标记的协程）。
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["app/output/*", "tests/*"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+extend-exclude = [
+    "*.md",
+    "frontend",
+    "app/output",
+    "app/updated",
+]
+
+[tool.ruff.lint]
+# 与项目既有 .pre-commit-config.yaml 的检查范围保持一致。
+# 刻意不开启 UP 规则集：把 Optional[str] 全量改成 str | None 属于风格迁移，
+# 会与现有代码风格大面积冲突，不适合作为附带改动。
+select = ["E", "F", "I", "W", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# B008 对 FastAPI 是误报：`files: List[UploadFile] = File(...)` 是该框架
+# 声明的标准依赖注入写法，不是"函数调用作为默认值"的设计问题。
+"app/api/server.py" = ["B008"]

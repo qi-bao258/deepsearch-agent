@@ -56,7 +56,10 @@ def list_knowledge_bases() -> str:
         _ensure_index()
         categories = local_kb.list_categories()
         if not categories:
-            return "本地知识库中没有任何文档，请把 PDF/Word/Excel/Markdown 放入 docs/knowledge_base 后重试"
+            return (
+                "本地知识库中没有任何文档，"
+                "请把 PDF/Word/Excel/Markdown 放入 docs/knowledge_base 后重试"
+            )
 
         # 汇总每个分类下的文档名，便于模型判断题能否交由该分类回答
         _, chunks = local_kb.load_index()
@@ -106,16 +109,24 @@ def ask_knowledge_base(question: str, category: str = "", top_k: int = 0) -> str
             matched = [c for c in categories if category in c or c in category]
             resolved_category = matched[0] if matched else category
 
-        results = local_kb.search(question, top_k=top_k, category=resolved_category or None)
+        results = local_kb.search(
+            question, top_k=top_k, category=resolved_category or None
+        )
         if not results:
-            scope = f"分类「{resolved_category}」中" if resolved_category else "知识库中"
-            return f"{scope}没有检索到与问题相关的内容，请调整问题表述或确认资料是否已导入"
+            if resolved_category:
+                scope = f"分类「{resolved_category}」中"
+            else:
+                scope = "知识库中"
+            return (
+                f"{scope}没有检索到与问题相关的内容，请调整问题表述或确认资料是否已导入"
+            )
 
         blocks = [f"问题：{question}"]
         for index, (score, chunk) in enumerate(results, start=1):
             page_info = f" 第{chunk.page}页" if chunk.page else ""
+            source = f"{chunk.category}/{chunk.source}{page_info}"
             blocks.append(
-                f"\n[片段{index}] 来源：{chunk.category}/{chunk.source}{page_info}；相关度：{score:.3f}\n{chunk.text}"
+                f"\n[片段{index}] 来源：{source}；相关度：{score:.3f}\n{chunk.text}"
             )
         return "\n".join(blocks)
     except Exception as e:
@@ -126,10 +137,11 @@ if __name__ == "__main__":
     # 本地调试入口：直接运行可验证索引构建与检索是否正常
     print(list_knowledge_bases.invoke({}))
     print("\n" + "=" * 60 + "\n")
+    debug_question = "电商平台运营负责人应如何制定下一年的 AI 应用路线图？"
     print(
         ask_knowledge_base.invoke(
             {
-                "question": "如果我是一个电商平台运营负责人，应该怎样制定 2026 年 AI 应用路线图？",
+                "question": debug_question,
                 "category": "电商行业",
                 "top_k": 3,
             }

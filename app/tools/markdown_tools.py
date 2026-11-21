@@ -6,18 +6,16 @@ filename/path 交给 resolve_path 统一解析，避免模型直接操作真实�
 """
 
 from pathlib import Path
+from typing import Annotated
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-
-try:
-    from typing import Annotated
-except ImportError:
-    from typing_extensions import Annotated
 from langchain_core.tools import tool
 
 from app.api.context import get_session_context
 from app.api.monitor import monitor
-from app.utils.path_utils import resolve_path
+from app.infra.log import logger
+from app.utils.path_utils import PathSecurityError, resolve_path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 @tool
@@ -34,41 +32,42 @@ def generate_markdown(
     :param path: 可选保存路径；通常由运行时工作目录指令约束为相对路径
     :return: 文件生成结果说明
     """
-    print(f"[MarkdownTool] 输入保存路径: {path or '当前会话目录'}")
     monitor.report_tool("Markdown文档生成工具", {"写入的文本内容": content})
     if not filename.endswith(".md"):
         filename += ".md"
 
     # session_dir 由 run_deep_agent 写入 ContextVar，保证文件写入当前会话工作目录
     session_dir = get_session_context()
-    print(f"[MarkdownTool] 当前会话目录: {session_dir}")
+    logger.debug(f"Markdown 保存 session_dir={session_dir} filename={filename}")
 
-    # 先把模型传入的 path/filename 合成一个逻辑路径，再交给 resolve_path 做统一清洗
-    if path and path != ".":
-        full_input_path = str(Path(path) / filename)
-    else:
-        full_input_path = filename
-    full_path_str = resolve_path(full_input_path, session_dir)
-    file_path = Path(full_path_str)
-
-    parent_dir = file_path.parent
-
-    print(
-        f"[MarkdownTool] Debug: parent_dir={parent_dir}, filename={filename}, full_path={file_path}"
-    )
-
+    # 把路径解析也纳入 try：resolve_path 会对越界路径抛 PathSecurityError，
+    # 工具契约要求"返回可读的错误说明"而不是把异常抛回 Agent 中断整条链路。
     try:
+        # 先把模型传入的 path/filename 合成一个逻辑路径，再交给 resolve_path 做统一清洗
+        if path and path != ".":
+            full_input_path = str(Path(path) / filename)
+        else:
+            full_input_path = filename
+        file_path = Path(resolve_path(full_input_path, session_dir))
+
+        parent_dir = file_path.parent
+        logger.debug(f"Markdown 目标路径解析完成: {file_path}")
+
         # 允许模型指定 session_dir 下的子目录；不存在时自动创建
         if not parent_dir.exists():
             parent_dir.mkdir(parents=True, exist_ok=True)
-            print(f"[MarkdownTool] 已创建目录: {parent_dir}")
+            logger.debug(f"已创建目录: {parent_dir}")
 
         file_path.write_text(content, encoding="utf-8")
-
-        print(f"[MarkdownTool] 文件写入完成: {file_path}")
+        logger.info(f"Markdown 文件写入完成: {file_path}")
         return f"Markdown文件 '{file_path}' 已成功生成并保存。"
+
+    except PathSecurityError as e:
+        # 路径越界属于"可预期的拒绝"，明确告知模型换用工作目录内路径
+        logger.warning(f"Markdown 写入被路径安全策略拦截: {e}")
+        return f"生成Markdown文件失败：{e}，请使用工作目录内的相对路径。"
     except Exception as e:
-        print(f"[MarkdownTool] 文件写入失败: {e}")
+        logger.exception(f"Markdown 文件写入失败: {e}")
         return f"生成Markdown文件失败: {str(e)}"
 
 
@@ -91,4 +90,4 @@ if __name__ == "__main__":
     print(f"\n调用结果：{result}")
     if "已成功生成" in result:
         file_path = Path(result.split("'")[1])
-        print(f"验证结果：文件 {file_path} {'存在' if file_path.exists() else '不存在'}")
+        print(f"验证结果：{file_path} 存在={file_path.exists()}")

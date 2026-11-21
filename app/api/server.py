@@ -7,7 +7,6 @@ WebSocket 长连接。HTTP 接口只做轻量调度，真正的 DeepAgents 执�
 """
 
 import asyncio
-import shutil
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -19,16 +18,23 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Request,
     UploadFile,
     WebSocket,
     WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from app.agent.main_agent import run_deep_agent
 from app.api.monitor import manager
+from app.infra.log import logger
+
+# 单个上传文件的大小上限（50 MB）。
+# 没有上限时，一个超大文件就能占满磁盘或拖垮请求处理。
+MAX_UPLOAD_SIZE = 50 * 1024 * 1024
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -78,6 +84,32 @@ class TaskRequest(BaseModel):
     thread_id: str = None
 
 
+# 业务错误码：前端按 code 做分支，message 只用于展示。
+# 统一异常出口把这些异常收敛成 JSON，避免默认的 500 页面把堆栈带回客户端。
+INVALID_PARAM = 10001
+FILE_ERROR = 50001
+
+
+class UploadError(Exception):
+    """上传接口的可预期失败，带业务码"""
+
+    def __init__(self, message: str, code: int) -> None:
+        super().__init__(message)
+        self.message = message
+        self.code = code
+
+
+@app.exception_handler(UploadError)
+async def handle_upload_error(_request: Request, exc: UploadError) -> JSONResponse:
+    """上传失败统一返回 {code, message}，参数类错误按 400，落盘类错误按 500"""
+    status_code = 400 if exc.code == INVALID_PARAM else 500
+    logger.warning(f"上传失败 code={exc.code} message={exc.message}")
+    return JSONResponse(
+        status_code=status_code,
+        content={"code": exc.code, "message": exc.message},
+    )
+
+
 def _forget_task(thread_id: str, task: asyncio.Task) -> None:
     """
     清理已结束任务的登记关系。
@@ -125,7 +157,7 @@ async def cancel_task(thread_id: str):
         active_tasks.pop(thread_id, None)
         raise HTTPException(status_code=404, detail="任务不存在或已结束")
 
-    # 先发出取消信号，再短暂等待协程响应；若底层阻塞中，则返回 cancelling 给前端继续展示状态
+    # 先发取消信号，再短暂等待协程响应；底层阻塞时返回 cancelling 让前端继续展示
     task.cancel()
     try:
         await asyncio.wait_for(task, timeout=1.0)
@@ -156,17 +188,56 @@ async def upload_files(files: List[UploadFile] = File(...), thread_id: str = For
         files (List[UploadFile]): 文件对象列表。
         thread_id (str): 关联的任务会话 ID。
     """
+    # thread_id 直接参与目录拼接，必须先校验：
+    # `..` 会让 updated/session_../escape 落到 updated 之外。
+    if not thread_id:
+        raise UploadError("thread_id 不能为空", code=INVALID_PARAM)
+    if "/" in thread_id or "\\" in thread_id or ".." in thread_id:
+        raise UploadError("thread_id 含非法字符", code=INVALID_PARAM)
+
     # 上传文件先按会话隔离保存，避免不同任务读取到彼此的附件
     target_dir = updated_dir / f"session_{thread_id}"
     target_dir.mkdir(parents=True, exist_ok=True)
 
     saved_files = []
     for file in files:
-        file_path = target_dir / file.filename
-        # 直接复制文件流，避免大文件一次性读入内存
-        with file_path.open("wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        saved_files.append(file.filename)
+        # file.filename 完全由客户端提供：传 "../../app/config.py" 就能覆盖源码。
+        # Path(...).name 只取最后一段，剥离掉所有目录成分。
+        safe_name = Path(file.filename or "").name
+        if not safe_name or safe_name in {".", ".."}:
+            logger.warning(f"跳过非法文件名: {file.filename!r}")
+            continue
+
+        file_path = target_dir / safe_name
+
+        # 二次确认落盘路径仍在会话目录内
+        if not file_path.resolve().is_relative_to(target_dir.resolve()):
+            logger.warning(f"拒绝越界的上传路径: {file_path}")
+            continue
+
+        # 分块写入并累计大小，超限立即中断并清理残片
+        size = 0
+        try:
+            with file_path.open("wb") as buffer:
+                while chunk := await file.read(1024 * 1024):
+                    size += len(chunk)
+                    if size > MAX_UPLOAD_SIZE:
+                        buffer.close()
+                        file_path.unlink(missing_ok=True)
+                        limit_mb = MAX_UPLOAD_SIZE // 1024 // 1024
+                        raise UploadError(
+                            f"文件 {safe_name} 超过 {limit_mb} MB 上限",
+                            code=FILE_ERROR,
+                        )
+                    buffer.write(chunk)
+        except UploadError:
+            raise
+        except Exception as e:
+            logger.exception(f"上传文件写入失败: {safe_name}")
+            raise UploadError(f"文件写入失败: {e}", code=FILE_ERROR) from e
+
+        saved_files.append(safe_name)
+        logger.info(f"上传完成 name={safe_name} size={size}")
 
     return {"status": "uploaded", "files": saved_files}
 
