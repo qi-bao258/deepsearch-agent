@@ -1,0 +1,35 @@
+# 构建产物与无关文件不进镜像：减小体积，避免泄漏本地配置
+.venv/
+.uv-cache/
+__pycache__/
+*.py[cod]
+*.pyc
+
+# 敏感配置：绝不进镜像，运行时通过环境变量或挂载注入
+.env
+.env.*
+
+# 运行时与测试产物
+app/output/
+app/updated/
+docs/knowledge_base/.kb_index/
+logs/
+eval/report.json
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# 前端由独立镜像负责构建，不参与后端镜像
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# 版本控制与文档
+.git/
+.git-backup/
+.gitignore
+.vscode/
+docs/
+*.md

@@ -11,6 +11,8 @@ docs/knowledge_base/.kb_index/
 eval/report.json
 # loguru 落盘的运行日志
 logs/
+# 临时诊断脚本产物
+_tmp_*
 # 历史改写前的本地备份，不纳入版本控制
 .git-backup/
 /out-tsc

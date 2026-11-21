@@ -7,6 +7,7 @@ WebSocket 长连接。HTTP 接口只做轻量调度，真正的 DeepAgents 执�
 """
 
 import asyncio
+import os
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -119,6 +120,43 @@ def _forget_task(thread_id: str, task: asyncio.Task) -> None:
     """
     if active_tasks.get(thread_id) is task:
         active_tasks.pop(thread_id, None)
+
+
+@app.get("/health", tags=["ops"])
+async def health():
+    """
+    存活探针。
+
+    只反映进程是否存活，不探测下游依赖——依赖探活交给 /health/ready。
+    两者分开是为了避免外部服务抖动被误判成本服务不可用而触发反复重启。
+    """
+    return {"status": "ok"}
+
+
+@app.get("/health/ready", tags=["ops"])
+async def readiness():
+    """
+    就绪探针。
+
+    关键外部依赖（LLM、Embedding、Tavily、MySQL）全部通过环境变量配置。
+    这里只校验配置是否齐备，不发真实请求：既能拦住「漏填配置导致必然失败」
+    这类最常见的部署问题，又不会让探针本身变成外部服务的压力来源。
+    """
+    required = ["OPENAI_API_KEY", "OPENAI_BASE_URL", "LLM_QWEN_MAX"]
+    checks = {key: bool(os.getenv(key)) for key in required}
+    ready = all(checks.values())
+
+    if not ready:
+        missing = [k for k, v in checks.items() if not v]
+        logger.warning(f"就绪检查未通过，缺失配置: {missing}")
+
+    return JSONResponse(
+        status_code=200 if ready else 503,
+        content={
+            "status": "ready" if ready else "not_ready",
+            "dependencies": checks,
+        },
+    )
 
 
 @app.post("/api/task")

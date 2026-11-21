@@ -1,6 +1,6 @@
 <div align='center'>
   <h1 style="margin-top: 15px;">「深度研搜」对话式多智能体研究系统</h1>
-  <h4><b>deepsearch-agents</b></h4>
+  <h4><b>deepsearch-agent</b></h4>
   <p><em>基于 DeepAgents 构建的企业级多智能体深度研究平台：主智能体统一调度，专家助手分工检索，多源证据汇总，成果直接落盘交付</em></p>
 </div>
 
@@ -98,6 +98,9 @@
 | 实时通信 | `WebSocket` | 推送工具调用、助手调用、最终结果与错误事件 |
 | 前端 | `React` / `Vite` / `Ant Design` / `Tailwind CSS` | 对话式研搜界面、事件流、附件上传与文件下载 |
 | 依赖管理 | `uv` / `pnpm` | 管理 Python 后端与前端依赖 |
+| 工程质量 | `pytest` / `ruff` / GitHub Actions | 单测、静态检查、安全评测门禁与镜像构建 |
+| 可观测性 | `loguru` | 结构化日志，自动注入 session / thread 上下文 |
+| 容器化 | Docker 多阶段构建 | 非 root 运行、双探针健康检查 |
 
 ### 知识库检索方案
 
@@ -116,7 +119,7 @@ RAGFlow 版本的工具实现以注释形式完整保留在 `app/tools/ragflow_t
 ## 📁 项目结构
 
 ```text
-deepsearch-agents/
+deepsearch-agent/
 ├── app/
 │   ├── agent/
 │   │   ├── subagents/              # 网络搜索、数据库查询、知识库三个子智能体
@@ -126,25 +129,32 @@ deepsearch-agents/
 │   ├── api/
 │   │   ├── context.py              # ContextVar 保存 thread_id 与 session_dir
 │   │   ├── monitor.py              # 工具调用、助手调用、结果与异常事件推送
-│   │   └── server.py               # FastAPI 任务、上传、文件、下载、WebSocket 接口
+│   │   └── server.py               # FastAPI 任务、上传、文件、下载、健康检查、WebSocket 接口
+│   ├── infra/                      # 基础设施层：SQL 安全护栏、结构化日志
 │   ├── knowledge/
 │   │   └── local_kb.py             # 本地轻量 RAG 引擎（解析、切块、向量化、检索）
 │   ├── prompt/
 │   │   └── prompts.yml             # 主智能体与子智能体提示词配置
 │   ├── ragflow/                    # RAGFlow 配置加载与知识库初始化脚本（可选方案）
 │   ├── tools/                      # Tavily、MySQL、知识库、文件读取、Markdown、PDF 工具
-│   ├── utils/                      # 路径解析、Markdown/PDF 底层转换
+│   ├── utils/                      # 路径解析（含越界拦截）、Markdown/PDF 底层转换
 │   ├── output/                     # 运行时生成：每个会话的 Markdown、PDF 产物
 │   └── updated/                    # 运行时生成：用户上传文件的会话暂存目录
+├── .github/workflows/ci.yaml       # CI：Lint、单测、安全评测门禁、镜像构建
 ├── docker/
 │   ├── docker-compose.yaml         # 本地 MySQL 业务数据库
 │   └── mysql/mysql.sql             # 药品、库存、销售业务模拟数据
 ├── docs/
 │   ├── images/                     # 架构图与界面截图
 │   └── knowledge_base/             # 知识库示例资料（金融、电商两类）
+├── eval/
+│   ├── golden_set.yaml             # 安全护栏回归评测集
+│   └── run_eval.py                 # 离线评测执行入口
 ├── frontend/                       # React + Vite 前端项目
+├── tests/                          # pytest 单元测试（护栏、路径解析、上传接口）
 ├── .env.example                    # 环境变量示例
-├── pyproject.toml                  # Python 项目依赖声明
+├── Dockerfile                      # 后端两阶段构建镜像
+├── pyproject.toml                  # Python 项目依赖与 ruff / pytest 配置
 ├── requirements.txt                # 依赖清单
 └── uv.lock                         # uv 锁定文件
 ```
@@ -165,8 +175,8 @@ deepsearch-agents/
 ### 2. 安装依赖
 
 ```bash
-git clone https://github.com/didilili/deepsearch-agents.git
-cd deepsearch-agents
+git clone https://github.com/qi-bao258/deepsearch-agent.git
+cd deepsearch-agent
 uv sync
 ```
 
@@ -239,6 +249,46 @@ pnpm dev
 
 默认连接 `http://localhost:8000` 与 `ws://localhost:8000`，可在 `frontend/.env.local` 中通过 `VITE_API_BASE_URL`、`VITE_WS_BASE_URL` 覆盖。
 
+## 🛡️ 安全边界
+
+模型生成的 SQL、文件路径和上传文件名都不可信——提示词注入可以让它返回 `DROP TABLE`、`../../.env` 或 `../../app/config.py`。本项目没有把这些风险交给提示词，而是在工具层做了程序化拦截：
+
+| 风险面 | 拦截位置 | 机制 |
+| --- | --- | --- |
+| SQL 写操作与注入 | `app/infra/sql_guard.py` | 语句白名单（仅 `SELECT` / `WITH`）、禁止关键字词边界扫描、多语句拦截、强制 `LIMIT` |
+| 表名 / 字段名注入 | `app/infra/sql_guard.py` | 标识符仅允许 `[A-Za-z_][A-Za-z0-9_]{0,63}` |
+| 文件路径越界 | `app/utils/path_utils.py` | `resolve()` 后校验，仅放行会话目录与 `updated/`，其余抛 `PathSecurityError` |
+| 上传文件名穿越 | `app/api/server.py` | 剥离目录成分、落盘路径二次确认、拒绝含 `..` 的 `thread_id`、50 MB 单文件上限 |
+
+设计上有两个细节值得说明：
+
+- **词边界匹配**：`update_time` 不会被误判为 `update` 关键字；`WHERE name = 'delete'` 里的字面量也不会触发拦截。
+- **LIMIT 强制补齐**：无 `LIMIT` 时自动补、超界时自动收紧，避免一次查询把整张表拉回模型上下文。
+
+## ✅ 测试与评测
+
+```bash
+uv run pytest -q                    # 54 个用例：SQL 护栏、标识符、路径解析、上传接口
+uv run python -m eval.run_eval      # 安全护栏回归评测，输出通过率与 JSON 报告
+uv run ruff check .                 # 静态检查
+uv run ruff format --check .         # 格式检查
+```
+
+`eval/golden_set.yaml` 收录 32 条用例，覆盖三类边界：语句类型与时序（`s001–s014`）、标识符长度与字符集（`i001–i010`）、路径放行与越界（`p001–p008`）。
+
+评测门槛设为 **100%**，与检索质量的模糊阈值不同：护栏是确定性规则，任何一条既有判定被改变都属于回归。因此它适合作为 CI 门禁——`.github/workflows/ci.yaml` 中评测与单测是两个独立 job，单测失败说明代码坏了，评测失败说明安全判定被改了，两类问题分开定位。
+
+## 🐳 容器化
+
+```bash
+docker build -t deepsearch-agent .
+docker run --rm -p 8000:8000 --env-file .env deepsearch-agent
+```
+
+镜像采用两阶段构建（`builder` 装依赖 → `runtime` 只拷虚拟环境），运行阶段不含包管理器；以非 root 用户 `appuser` 运行；`HEALTHCHECK` 打 `/health/ready`，配置漏填时会被标记为不健康而非等用户请求失败才发现。
+
+两个探针的职责分开：`/health` 只判进程存活，`/health/ready` 校验关键环境变量是否齐备，避免把外部服务抖动误判成本服务不可用而触发反复重启。
+
 <a id="api"></a>
 
 ## 🔌 接口契约
@@ -250,19 +300,20 @@ pnpm dev
 | `POST /api/upload` | 上传一个或多个文件到当前会话 |
 | `GET /api/files` | 列出当前会话输出目录中的生成文件 |
 | `GET /api/download` | 下载输出目录中的文件 |
+| `GET /health` | 存活探针 |
+| `GET /health/ready` | 就绪探针，校验关键环境变量 |
 | `WebSocket /ws/{thread_id}` | 推送工具调用、助手调用、结果与异常事件 |
 
 事件类型：`session_created`、`assistant_call`、`tool_start`、`task_result`、`error`。
 
 ## 🚧 能力边界
 
-「深度研搜」聚焦多智能体工程主链路，覆盖 DeepAgents 调度、真实工具接入、文件交付、FastAPI 接口、WebSocket 实时推送与前后端联调。以下生产治理能力未刻意展开：
+「深度研搜」聚焦多智能体工程主链路，覆盖 DeepAgents 调度、真实工具接入、文件交付、FastAPI 接口、WebSocket 实时推送、安全护栏、单元测试与容器化。以下生产治理能力未刻意展开：
 
 - 用户登录、角色权限与多租户隔离
-- 文件上传安全扫描与内容审核
+- 文件上传的病毒扫描与内容审核
 - 任务队列、分布式执行与大规模并发治理
 - 全量事件持久化、历史会话恢复与审计追踪
-- 系统化评测集、自动化回归与 Agent 质量评估
 - 生产监控、告警、链路追踪与灰度发布
 - 复杂报告编辑、协同工作流与权限化文件管理
 
