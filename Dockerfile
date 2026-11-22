@@ -20,6 +20,11 @@ ENV UV_COMPILE_BYTECODE=0 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never
 
+# 可选包索引镜像：国内网络 PyPI 直连可能极慢甚至卡死。
+# 构建时用 --build-arg UV_INDEX_URL=<镜像地址> 覆盖，不传则走默认 PyPI。
+ARG UV_INDEX_URL=https://pypi.org/simple
+ENV UV_DEFAULT_INDEX=${UV_INDEX_URL}
+
 WORKDIR /app
 
 # 先只拷依赖清单：源码变更时依赖层仍能命中缓存

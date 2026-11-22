@@ -285,7 +285,13 @@ docker build -t deepsearch-agent .
 docker run --rm -p 8000:8000 --env-file .env deepsearch-agent
 ```
 
-镜像采用两阶段构建（`builder` 装依赖 → `runtime` 只拷虚拟环境），运行阶段不含包管理器；以非 root 用户 `appuser` 运行；`HEALTHCHECK` 打 `/health/ready`，配置漏填时会被标记为不健康而非等用户请求失败才发现。
+国内网络下 PyPI 直连可能极慢，可指定镜像源：
+
+```bash
+docker build --build-arg UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ -t deepsearch-agent .
+```
+
+镜像采用两阶段构建（`builder` 装依赖 → `runtime` 只拷虚拟环境），运行阶段不含包管理器；以非 root 用户 `appuser` 运行；`HEALTHCHECK` 打 `/health/ready`，配置漏填时会被标记为不健康，而非等用户请求失败才发现。
 
 两个探针的职责分开：`/health` 只判进程存活，`/health/ready` 校验关键环境变量是否齐备，避免把外部服务抖动误判成本服务不可用而触发反复重启。
 
